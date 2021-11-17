@@ -50,7 +50,8 @@
     "lint": "tslint -p . -t verbose",
     "publish-local": "yarn build && rollup -c && yalc push",
     "build-npm": "yarn build && rollup -c",
-    "test": "ts-node --skip-ignore --project tsconfig.test.json run_tests.ts"
+    "test": "ts-node --skip-ignore --project tsconfig.test.json run_tests.ts",
+    "postinstall": "npm run build"
   },
   "browser": {"fs": false, "crypto": false},
   "license": "Apache-2.0"
