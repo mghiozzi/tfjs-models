@@ -192,7 +192,6 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
       const source = this.audioContext.createMediaElementSource(this.audioTrack);
       source.connect(destination);
       this.stream = destination.stream;
-      console.log('Setting stream to audio', this.stream);
     } else {
       this.stream = await getAudioMediaStream(audioTrackConstraints);
     }
@@ -235,7 +234,6 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
       this.freqDataQueue.shift();
     }
     const shouldFire = this.tracker.tick();
-    console.log(shouldFire, this.freqData);
     if (shouldFire) {
       const freqData = flattenQueue(this.freqDataQueue);
       const freqDataTensor = getInputTensorFromFrequencyData(
@@ -256,7 +254,6 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
   }
 
   async stop(): Promise<void> {
-    console.log('Extractor stop called');
     if (this.frameIntervalTask == null) {
       throw new Error(
         'Cannot stop because there is no ongoing streaming activity.');

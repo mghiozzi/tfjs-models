@@ -108,7 +108,6 @@ export class BrowserFftSpeechCommandRecognizer implements
     metadataOrURL?: SpeechCommandRecognizerMetadata | string) {
     // TODO(cais): Consolidate the fields into a single config object when
     // upgrading to v1.0.
-    console.log('SpeechCommands mg fork');
     tf.util.assert(
       modelArtifactsOrURL == null && metadataOrURL == null ||
       modelArtifactsOrURL != null && metadataOrURL != null,
@@ -740,7 +739,6 @@ class TransferBrowserFftSpeechCommandRecognizer extends
         async (freqData: tf.Tensor, timeData?: tf.Tensor) => {
           // TODO(cais): can we consolidate the logic in the two branches?
           if (options.onSnippet == null) {
-            console.log('Not on snippet');
             const normalizedX = normalize(freqData);
             this.dataset.addExample({
               label: word,
@@ -755,7 +753,6 @@ class TransferBrowserFftSpeechCommandRecognizer extends
                 undefined
             });
             normalizedX.dispose();
-            console.log('Waiting stop');
             await this.audioDataExtractor.stop();
             this.streaming = false;
             this.collateTransferWords();
