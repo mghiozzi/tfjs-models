@@ -21,11 +21,11 @@
 
 import * as tf from '@tensorflow/tfjs-core';
 
-import {getAudioContextConstructor, getAudioMediaStream} from './browser_fft_utils';
-import {FeatureExtractor, RecognizerParams} from './types';
+import { getAudioContextConstructor, getAudioMediaStream } from './browser_fft_utils';
+import { FeatureExtractor, RecognizerParams } from './types';
 
 export type SpectrogramCallback = (freqData: tf.Tensor, timeData?: tf.Tensor) =>
-    Promise<boolean>;
+  Promise<boolean>;
 
 /**
  * Configurations for constructing BrowserFftFeatureExtractor.
@@ -35,7 +35,10 @@ export interface BrowserFftFeatureExtractorConfig extends RecognizerParams {
    * Number of audio frames (i.e., frequency columns) per spectrogram.
    */
   numFramesPerSpectrogram: number;
-
+  /**
+   * Audio to be used instead of microphone stream
+   */
+  useAudioTrack?: HTMLAudioElement;
   /**
    * Suppression period in milliseconds.
    *
@@ -110,6 +113,7 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
   private audioContextConstructor: any;
   private audioContext: AudioContext;
   private analyser: AnalyserNode;
+  private audioTrack: HTMLAudioElement;
   private tracker: Tracker;
   private freqData: Float32Array;
   private timeData: Float32Array;
@@ -129,8 +133,8 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
   constructor(config: BrowserFftFeatureExtractorConfig) {
     if (config == null) {
       throw new Error(
-          `Required configuration object is missing for ` +
-          `BrowserFftFeatureExtractor constructor`);
+        `Required configuration object is missing for ` +
+        `BrowserFftFeatureExtractor constructor`);
     }
 
     if (config.spectrogramCallback == null) {
@@ -139,14 +143,14 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
 
     if (!(config.numFramesPerSpectrogram > 0)) {
       throw new Error(
-          `Invalid value in numFramesPerSpectrogram: ` +
-          `${config.numFramesPerSpectrogram}`);
+        `Invalid value in numFramesPerSpectrogram: ` +
+        `${config.numFramesPerSpectrogram}`);
     }
 
     if (config.suppressionTimeMillis < 0) {
       throw new Error(
-          `Expected suppressionTimeMillis to be >= 0, ` +
-          `but got ${config.suppressionTimeMillis}`);
+        `Expected suppressionTimeMillis to be >= 0, ` +
+        `but got ${config.suppressionTimeMillis}`);
     }
     this.suppressionTimeMillis = config.suppressionTimeMillis;
 
@@ -158,32 +162,40 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
     this.columnTruncateLength = config.columnTruncateLength || this.fftSize;
     this.overlapFactor = config.overlapFactor;
     this.includeRawAudio = config.includeRawAudio;
+    this.audioTrack = config.useAudioTrack;
 
     tf.util.assert(
-        this.overlapFactor >= 0 && this.overlapFactor < 1,
-        () => `Expected overlapFactor to be >= 0 and < 1, ` +
-            `but got ${this.overlapFactor}`);
+      this.overlapFactor >= 0 && this.overlapFactor < 1,
+      () => `Expected overlapFactor to be >= 0 and < 1, ` +
+        `but got ${this.overlapFactor}`);
 
     if (this.columnTruncateLength > this.fftSize) {
       throw new Error(
-          `columnTruncateLength ${this.columnTruncateLength} exceeds ` +
-          `fftSize (${this.fftSize}).`);
+        `columnTruncateLength ${this.columnTruncateLength} exceeds ` +
+        `fftSize (${this.fftSize}).`);
     }
-
     this.audioContextConstructor = getAudioContextConstructor();
   }
 
   async start(audioTrackConstraints?: MediaTrackConstraints):
-      Promise<Float32Array[]|void> {
+    Promise<Float32Array[] | void> {
     if (this.frameIntervalTask != null) {
       throw new Error(
-          'Cannot start already-started BrowserFftFeatureExtractor');
+        'Cannot start already-started BrowserFftFeatureExtractor');
     }
 
-    this.stream = await getAudioMediaStream(audioTrackConstraints);
     this.audioContext = new this.audioContextConstructor(
-                            {sampleRate: this.sampleRateHz}) as AudioContext;
+      { sampleRate: this.sampleRateHz }) as AudioContext;
 
+    if (this.audioTrack) {
+      const destination = this.audioContext.createMediaStreamDestination();
+      const source = this.audioContext.createMediaElementSource(this.audioTrack);
+      source.connect(destination);
+      this.stream = destination.stream;
+      console.log('Setting stream to audio', this.stream);
+    } else {
+      this.stream = await getAudioMediaStream(audioTrackConstraints);
+    }
     const streamSource = this.audioContext.createMediaStreamSource(this.stream);
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = this.fftSize * 2;
@@ -196,13 +208,15 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
       this.timeDataQueue = [];
       this.timeData = new Float32Array(this.fftSize);
     }
+    if (this.audioTrack) {
+      await this.audioTrack.play();
+    }
     const period =
-        Math.max(1, Math.round(this.numFrames * (1 - this.overlapFactor)));
+      Math.max(1, Math.round(this.numFrames * (1 - this.overlapFactor)));
     this.tracker = new Tracker(
-        period,
-        Math.round(this.suppressionTimeMillis / this.frameDurationMillis));
-    this.frameIntervalTask = setInterval(
-        this.onAudioFrame.bind(this), this.fftSize / this.sampleRateHz * 1e3);
+      period,
+      Math.round(this.suppressionTimeMillis / this.frameDurationMillis));
+    this.frameIntervalTask = setInterval(this.onAudioFrame.bind(this), this.fftSize / this.sampleRateHz * 1e3);
   }
 
   private async onAudioFrame() {
@@ -221,18 +235,19 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
       this.freqDataQueue.shift();
     }
     const shouldFire = this.tracker.tick();
+    console.log(shouldFire, this.freqData);
     if (shouldFire) {
       const freqData = flattenQueue(this.freqDataQueue);
       const freqDataTensor = getInputTensorFromFrequencyData(
-          freqData, [1, this.numFrames, this.columnTruncateLength, 1]);
+        freqData, [1, this.numFrames, this.columnTruncateLength, 1]);
       let timeDataTensor: tf.Tensor;
       if (this.includeRawAudio) {
         const timeData = flattenQueue(this.timeDataQueue);
         timeDataTensor = getInputTensorFromFrequencyData(
-            timeData, [1, this.numFrames * this.fftSize]);
+          timeData, [1, this.numFrames * this.fftSize]);
       }
       const shouldRest =
-          await this.spectrogramCallback(freqDataTensor, timeDataTensor);
+        await this.spectrogramCallback(freqDataTensor, timeDataTensor);
       if (shouldRest) {
         this.tracker.suppress();
       }
@@ -241,9 +256,14 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
   }
 
   async stop(): Promise<void> {
+    console.log('Extractor stop called');
     if (this.frameIntervalTask == null) {
       throw new Error(
-          'Cannot stop because there is no ongoing streaming activity.');
+        'Cannot stop because there is no ongoing streaming activity.');
+    }
+    if (this.audioTrack) {
+      this.audioTrack.pause();
+      this.audioTrack.currentTime = 0;
     }
     clearInterval(this.frameIntervalTask);
     this.frameIntervalTask = null;
@@ -256,14 +276,14 @@ export class BrowserFftFeatureExtractor implements FeatureExtractor {
 
   setConfig(params: RecognizerParams) {
     throw new Error(
-        'setConfig() is not implemented for BrowserFftFeatureExtractor.');
+      'setConfig() is not implemented for BrowserFftFeatureExtractor.');
   }
 
   getFeatures(): Float32Array[] {
     throw new Error(
-        'getFeatures() is not implemented for ' +
-        'BrowserFftFeatureExtractor. Use the spectrogramCallback ' +
-        'field of the constructor config instead.');
+      'getFeatures() is not implemented for ' +
+      'BrowserFftFeatureExtractor. Use the spectrogramCallback ' +
+      'field of the constructor config instead.');
   }
 }
 
@@ -275,7 +295,7 @@ export function flattenQueue(queue: Float32Array[]): Float32Array {
 }
 
 export function getInputTensorFromFrequencyData(
-    freqData: Float32Array, shape: number[]): tf.Tensor {
+  freqData: Float32Array, shape: number[]): tf.Tensor {
   const vals = new Float32Array(tf.util.sizeFromShape(shape));
   // If the data is less than the output shape, the rest is padded with zeros.
   vals.set(freqData, vals.length - freqData.length);
@@ -305,8 +325,8 @@ export class Tracker {
     this.counter = 0;
 
     tf.util.assert(
-        this.period > 0,
-        () => `Expected period to be positive, but got ${this.period}`);
+      this.period > 0,
+      () => `Expected period to be positive, but got ${this.period}`);
   }
 
   /**
@@ -317,8 +337,8 @@ export class Tracker {
   tick(): boolean {
     this.counter++;
     const shouldFire = (this.counter % this.period === 0) &&
-        (this.suppressionOnset == null ||
-         this.counter - this.suppressionOnset > this.suppressionTime);
+      (this.suppressionOnset == null ||
+        this.counter - this.suppressionOnset > this.suppressionTime);
     return shouldFire;
   }
 
